@@ -1,0 +1,607 @@
+---
+output: word_document
+---
+<style>
+.main-container { 
+width: 1200px; 
+max-width:2800px;
+}
+
+body{
+background-color: #fdfdfd;
+}
+
+#header{
+text-align: center;
+}
+
+.author em{
+font-style: normal;
+}
+
+.date em{
+font-style: normal;
+}
+
+.level3{
+    color: #272727;
+}
+
+.level2{
+    color: #000;
+}
+
+</style>
+---
+title: "Facebook metrics Data Set"
+author: 'Hardik Gupta (section B, PGID: 71620027)'
+date: "8 April 2017"
+output: html_document
+---
+
+### Business Objective
+
+One of the most important factor while weighing the success of a facebook cosmetic page is how many users are engaged with the page. It is not just Page Likes but over the time how many people have appreciated or not appreciated the content that is uploaded on the page. Engagement with any post is an important factor measuring how much the content uploaded is affecting and reaching people. Based on this, we have chosen "Lifetime people who have liked your page and engaged with your post" as our dependent variable and our goal is to predict this based on the other regressors. We would like to examine which are those factors affecting the success of the post by the people who have liked the page. We would like to examine what kind of post (link,video, photo, status), time. day, month and other various factors receives maximum or minimum engagement. Based on this analysis, marketers can choose what kind of content and at what particular time can get the maximum level of engagement and hence better marketing.
+
+Dependent Variable 
+1. Lifetime people who have liked your page and engaged with your post
+
+Independent Variables:
+1. Post Hour
+2. Post Weekday
+3. Post month
+4. Type
+5. Category
+6. Paid
+7. Page total likes
+8. Comments
+9. Likes
+10. Shares
+11. Total interactions
+
+***
+### Loading libraries and Initialisation
+
+```{r, results='hold', warning=FALSE, message=FALSE}
+library(GGally)
+library(ggplot2) 
+library(car)
+library(MASS)
+library(corrplot) 
+library(ggcorrplot)
+library(perturb) 
+library(caTools)
+library(qpcR) 
+options(scipen = 1000)
+```
+
+***
+### Preliminary Data Analysis
+
+##### Inspecting the data set   
+
+```{r, results='hold', warning=FALSE, message=FALSE}
+fb.raw <- read.csv("F:/BIG DATA/ISB/Assignments/Term 2/Statistical Analysis 2/Project/data/Facebook.csv")
+summary(fb.raw)
+str(fb.raw)
+```
+
+##### Handling Missing Vaues
+
+Few missing values were observed in columns paid, like and share. Since these rows constitue only 1% of the entire dataset, we've removed them.
+
+```{r, results='hold', warning=FALSE, message=FALSE}
+fb.raw <- fb.raw[-c(which(is.na(fb.raw$Paid))),]
+fb.raw <- fb.raw[-c(which(is.na(fb.raw$share))),]
+```
+
+##### Converting Categorical Variables to factor and inspection of factor levels
+
+```{r, results='hold', warning=FALSE, message=FALSE}
+fb.raw$Post.Hour <- as.factor(fb.raw$Post.Hour)
+fb.raw$Post.Weekday <- as.factor(fb.raw$Post.Weekday)
+fb.raw$Post.Month <- as.factor(fb.raw$Post.Month)
+fb.raw$Type <- as.factor(fb.raw$Type)
+fb.raw$Category <- as.factor(fb.raw$Category)
+fb.raw$Paid <- as.factor(fb.raw$Paid)
+
+table(fb.raw$Type)
+table(fb.raw$Post.Month)
+table(fb.raw$Paid)
+table(fb.raw$Category)
+table(fb.raw$Post.Weekday)
+table(fb.raw$Post.Hour)
+```
+
+We observe that Post.Hour variable has only one record for levels 16,19,20,21,22,23. This will create problems while splitting the data. Hence, we remove these records containing single values.
+
+```{r, results='hold', warning=FALSE, message=FALSE}
+fb.raw <- fb.raw[-which(fb.raw$Post.Hour == 16),]
+fb.raw <- fb.raw[-which(fb.raw$Post.Hour == 19),]
+fb.raw <- fb.raw[-which(fb.raw$Post.Hour == 20),]
+fb.raw <- fb.raw[-which(fb.raw$Post.Hour == 22),]
+fb.raw <- fb.raw[-which(fb.raw$Post.Hour == 23),]
+
+fb.raw$Post.Hour <- factor(fb.raw$Post.Hour)
+table(fb.raw$Post.Hour)
+rownames(fb.raw) <- NULL
+```
+
+##### Training and test data classification
+
+We divide the data into training and test data sets in a ratio of 80:20
+
+```{r, results='hold', warning=FALSE, message=FALSE}
+set.seed(55)
+spl = sample.split(fb.raw$Lifetime.People.who.have.liked.your.Page.and.engaged.with.your.post, SplitRatio = 0.8)
+Train = subset(fb.raw, spl==TRUE)
+Test = subset(fb.raw, spl==FALSE)
+
+dim(Train)
+dim(Test)
+
+```
+
+***
+### Inspecting Independent and Dependent variables
+
+##### Independent variables
+
+```{r Boxplots,echo=FALSE}
+par(mfrow=c(1, 2))
+boxplot(Train$Page.total.likes, main = "Page.total.likes")
+boxplot(Train$comment, main = "comment")
+
+par(mfrow=c(1, 3))
+boxplot(Train$like, main = "like")
+boxplot(Train$share, main = "share")
+boxplot(Train$Total.Interactions, main="Total Interactions")
+```
+
+Our observations:
+
+1. Numerous outliers in the variables such as comment, share, like, total interactions.
+2. The variables are heavily right skewed which could suggest a need for transformation.
+
+##### Independent variables - Lifetime.People.who.have.liked.your.Page.and.engaged.with.your.post
+
+```{r, results='hold', warning=FALSE, message=FALSE}
+ggplot(Train, aes(x=Train$Lifetime.People.who.have.liked.your.Page.and.engaged.with.your.post)) + 
+  geom_density(fill="blue")
+```
+
+The dependent variable looks heavily right skewed. We can try a log transformation.
+
+```{r, results='hold', warning=FALSE, message=FALSE}
+ggplot(Train, aes(x=log(Train$Lifetime.People.who.have.liked.your.Page.and.engaged.with.your.post))) + 
+  geom_density(fill="blue")
+```
+
+We compare the distribution of the dependent variable and its log transformation with a normal distribution of same mean and standard deviation.
+
+
+```{r, results='hold', warning=FALSE, message=FALSE}
+norm<-rnorm(392, mean=mean(Train$Lifetime.People.who.have.liked.your.Page.and.engaged.with.your.post), 
+            sd=sd(Train$Lifetime.People.who.have.liked.your.Page.and.engaged.with.your.post)) 
+dat <- data.frame(cond = factor(rep(c("Y","Normal"), each=392)), 
+                  x = c(Train$Lifetime.People.who.have.liked.your.Page.and.engaged.with.your.post,norm)) 
+ggplot(dat, aes(x, fill=cond)) + geom_density(alpha=.3)
+
+lnorm<-rnorm(392, mean=mean(log(Train$Lifetime.People.who.have.liked.your.Page.and.engaged.with.your.post)), 
+             sd=sd(log(Train$Lifetime.People.who.have.liked.your.Page.and.engaged.with.your.post))) 
+dat <- data.frame(cond = factor(rep(c("Log.Y","Normal"), each = 392)), 
+                  x = c(log(Train$Lifetime.People.who.have.liked.your.Page.and.engaged.with.your.post),lnorm)) 
+ggplot(dat, aes(x, fill=cond)) + geom_density(alpha=.3)
+```
+
+We see that the log transformed variable fits better and is close to a normal distribution.
+
+***
+### Correlation and Scatter Plot Matrices
+
+```{r, results='hold', warning=FALSE, message=FALSE}
+
+mcor <- round(cor(Train[,-c(2:15)]),2) 
+#corrplot(mcor, method="number")
+ggpairs(Train[,c(15,1,16,17,18,19)])
+```
+
+***
+### Initial Model Fitting and Basic Diagnostics
+
+```{r, results='hold', warning=FALSE, message=FALSE}
+model1 <- lm(Lifetime.People.who.have.liked.your.Page.and.engaged.with.your.post ~ Page.total.likes + Type + 
+               Category + Post.Month + Post.Weekday + Post.Hour + Paid + comment + like + share + Total.Interactions, 
+             data = Train)
+summary(model1)
+```
+
+
+##### Interpretation from Model-1
+
+* R-Squared for the model is 69% which indicates that the model initially fits just well.
+* Few of the regressors are insignifcant and these need to be analysed and removed
+* Regressor Total.Interactions has coefficient values as NA. This is possibly because Total.Interactions is linearly related to the other variables (from correlation matrix we observe that correlation between like and Total Interactions is 1).
+
+***
+### Model-2
+
+Observing our model1, we build model2 by removing Total.Interactions.
+
+```{r, results='hold', warning=FALSE, message=FALSE}
+model2 <- lm(Lifetime.People.who.have.liked.your.Page.and.engaged.with.your.post ~ Page.total.likes + Type + 
+               Category + Post.Month + Post.Weekday + Post.Hour + Paid + comment + like + share, 
+             data = Train)
+summary(model2)
+
+```
+
+We obtain a model with R-Squared value of 0.7592
+
+
+##### Observing the residual plots and checking for Normality
+```{r, results='hold', warning=FALSE, message=FALSE}
+residuals <- rstandard(model2)
+qqnorm(residuals)
+qqline(residuals)
+
+stu.resid <- studres(model2) 
+hist(stu.resid, freq=FALSE, main="Distribution of Studentized Residuals") 
+xfit<-seq(-3.5, 7,length=40) 
+yfit<-dnorm(xfit) 
+lines(xfit, yfit)
+```
+
+Observing the above plots shows that the model fits just well with the data, however the histogram is distorted
+
+##### Residuals plot with Fitted values and other Regressors 
+```{r, results='hold', warning=FALSE, message=FALSE}
+residualPlots(model2,id.n=3)
+
+```
+
+Observing the residual plots, we perform the following Transformation 
+
+* Lifetime.People.who.have.liked.your.Page.and.engaged.with.your.post - Logarithimic transformation (Since skewed to right)
+* comment - Logarithimic transformation (Since skewed to right)
+* like - Logarithimic transformation (Since skewed to right)
+* share - Logarithimic transformation (Since skewed to right)
+
+***
+##### Transformations
+```{r, results='hold', warning=FALSE, message=FALSE}
+log.comment <- log(fb.raw$comment+1)
+par(mfrow=c(1, 2))
+boxplot(fb.raw$comment, main = "comment")
+boxplot(log.comment, main = "Log - comment")
+
+log.like <- log(fb.raw$like)
+par(mfrow=c(1, 2))
+boxplot(fb.raw$like, main = "like")
+boxplot(log.like, main = "Log - like")
+
+log.share <- log(fb.raw$share)
+par(mfrow=c(1, 2))
+boxplot(fb.raw$share, main = "share")
+boxplot(log.share, main = "Log - share")
+
+```
+
+The data fits better after performing the Transformations
+
+##### Checking for Influential Observations/ Deletion Diagnostics
+
+Analysing the influential variables using Cook's Distance
+
+```{r, results='hold', warning=FALSE, message=FALSE}
+cutoff <- 4/((nrow(Train)-length(model2$coefficients)-2))
+plot(model2, which=4, cook.levels=cutoff)
+
+```
+We observe that observation 165, 271, 453 have very large Cook's distance. Next we check whether their deletion affects our model or not
+
+### Model 3 - Running the model by removing the influential observation
+```{r, results='hold', warning=FALSE, message=FALSE}
+Train_1 <- Train[-which(row.names(Train) == 165),]
+Train_1 <- Train[-which(row.names(Train) == 271),]
+Train_1 <- Train[-which(row.names(Train) == 453),]
+
+model3 <- lm(Lifetime.People.who.have.liked.your.Page.and.engaged.with.your.post ~ Page.total.likes + Type + 
+               Category + Post.Month + Post.Weekday + Post.Hour + Paid + comment + like + share, 
+             data = Train_1)
+summary(model3)
+```
+
+Removing influential observation did not affect the model.
+
+We will now perform transformation on the dependent variable and few of the independent variable by observing 
+the residual plots from model2
+
+***
+### Model 4
+
+```{r, results='hold', warning=FALSE, message=FALSE}
+Train$log.comment <- log(Train$comment+1)
+Train$log.like <- log(Train$like+1)
+Train$log.share <- log(Train$share+1)
+Train$log.Y <- log(Train$Lifetime.People.who.have.liked.your.Page.and.engaged.with.your.post)
+
+
+model4 <- lm(log.Y ~ Page.total.likes + Type + Category + Post.Month + Post.Weekday + Post.Hour + Paid + 
+               log.comment + log.like + log.share, 
+             data = Train)
+summary(model4)
+```
+
+By using Transformation, we obtain R-Squared value of 0.8175. The model fits well with the data. Comparing Adjusted R-squared with the previous model value, this value is also very high
+
+##### Observing the residual plots and checking for Normality
+
+```{r, results='hold', warning=FALSE, message=FALSE}
+residuals <- rstandard(model4)
+qqnorm(residuals)
+qqline(residuals)
+
+stu.resid <- studres(model4) 
+hist(stu.resid, freq=FALSE, main="Distribution of Studentized Residuals") 
+xfit<-seq(-3.5, 7,length=40) 
+yfit<-dnorm(xfit) 
+lines(xfit, yfit)
+```
+
+The residual plots, QQplot and Histogram, both are almost normally distributed. This means the model fits well
+
+##### Residuals plot with Fitted values and other Regressors 
+```{r, results='hold', warning=FALSE, message=FALSE}
+residualPlots(model4,id.n=3)
+```
+Observing the residual vs fitted plots and residuals vs regressors plot, the errors are almost randomly distributed. We see that our model fits well
+
+***
+### Checking for Collinearity
+
+##### Variance Inflation Factors 
+```{r, results='hold', warning=FALSE, message=FALSE}
+vif(model4)
+```
+
+Observing the Variance Inflation Factors, the values are almost less than or close to 10 (cut-off factor)
+
+##### Variance Decomposition Proportion
+```{r, results='hold', warning=FALSE, message=FALSE}
+colldiag(Train[,-c(2:15, 20:23)], center = TRUE)
+```
+
+* Observing Variance Decomposition Proportion, it hints that comment, like and share are linearly correlated.
+* Observing the correlation matrix also suggest high correlation between the three
+
+We now build a model by dropping one of them, mostly the one which is least correlated with the output - Comment
+
+***
+### Model 5
+
+```{r, results='hold', warning=FALSE, message=FALSE}
+model5 <- lm(log.Y ~ Page.total.likes + Type + Category + Post.Month + Post.Weekday + Post.Hour + Paid + log.like + log.share, 
+             data = Train)
+summary(model5)
+```
+
+The R-Squared value increases to 0.817
+
+##### Observing the residual plots and checking for Normality
+
+```{r, results='hold', warning=FALSE, message=FALSE}
+residuals <- rstandard(model5)
+
+qqnorm(residuals)
+qqline(residuals)
+
+stu.resid <- studres(model5) 
+hist(stu.resid, freq=FALSE, main="Distribution of Studentized Residuals") 
+xfit<-seq(-3.5, 7,length=40) 
+yfit<-dnorm(xfit) 
+lines(xfit, yfit)
+```
+
+##### Residuals plot with Fitted values and other Regressors 
+```{r, results='hold', warning=FALSE, message=FALSE}
+residualPlots(model5,id.n=3)
+```
+We have built a model with R-Squared equal close to 0.82. The model fits the data well which can be even confirmed from the
+residual plots
+
+Next we try to see if interations can improve the performance of the model.
+
+***
+### Model 6
+
+We try to see how interactions between categorical variables can improve the performance of the model. Interactions will
+help to identify how a particular post of particular kind when uploaded at a particular hour/month and if paid or not
+is able to attract maximum engagement from the user
+
+On checking different permutations and combinations, we observed that interactions between Type, Post.Weekday and Post.Hour
+improves the performance of the model significantly. This interaction will help us determine which type of post when
+uploaded at what particular weekday and hour attracts maximum engagement from the user
+
+```{r, results='hold', warning=FALSE, message=FALSE}
+model6 = lm(log.Y ~ Page.total.likes + Type + Category + Post.Month + Post.Weekday + Post.Hour + Paid + log.like + log.share +
+              Type*Post.Weekday*Post.Hour , data = Train)
+summary(model6)
+```
+
+The R-Squared of the model has increased to 0.8499. The Adjusted R-Squared has also improved
+
+##### Observing the residual plots and checking for Normality
+
+```{r, results='hold', warning=FALSE, message=FALSE}
+residuals <- rstandard(model6)
+qqnorm(residuals)
+qqline(residuals)
+
+stu.resid <- studres(model6) 
+hist(stu.resid, freq=FALSE, main="Distribution of Studentized Residuals") 
+xfit<-seq(-3.5, 7,length=40) 
+yfit<-dnorm(xfit) 
+lines(xfit, yfit)
+
+```
+
+
+##### Residuals plot with Fitted values and other Regressors 
+```{r, results='hold', warning=FALSE, message=FALSE}
+residualPlots(model6,id.n=3)
+```
+
+Observing the residuals plots, the model fits well.
+
+Next we select the best subset model using stepwise regression
+
+***
+### Best Subset selection
+
+We will use the AIC criterion for obtaining the best subset. 
+
+```{r, results='hold', warning=FALSE, message=FALSE}
+step <- stepAIC(model6, direction="both")
+step$anova # display results
+```
+It is observed that many regressors have dropped.
+The best model is
+
+lm(log.Y ~ Page.total.likes + Type + Category + Post.Month + Post.Weekday + 
+                  Post.Hour + log.like + Type:Post.Weekday + Type:Post.Hour, data = Train)
+
+```{r, results='hold', warning=FALSE, message=FALSE}
+BestModel <- lm(log.Y ~ Page.total.likes + Type + Category + Post.Month + Post.Weekday + 
+                  Post.Hour + log.like + Type:Post.Weekday + Type:Post.Hour, data = Train)
+summary(BestModel)
+```
+
+##### Observing the residual plots and checking for Normality
+
+```{r, results='hold', warning=FALSE, message=FALSE}
+residuals <- rstandard(BestModel)
+qqnorm(residuals)
+qqline(residuals)
+
+stu.resid <- studres(BestModel) 
+hist(stu.resid, freq=FALSE, main="Distribution of Studentized Residuals") 
+xfit<-seq(-3.5, 7,length=40) 
+yfit<-dnorm(xfit) 
+lines(xfit, yfit)
+```
+
+
+##### Residuals plot with Fitted values and other Regressors 
+```{r, results='hold', warning=FALSE, message=FALSE}
+residualPlots(BestModel,id.n=3)
+```
+
+We have successfully built a model which explains almost 85% variability in the data with most significant regressors
+
+***
+### Validation
+
+We test our model using the test data set and use the model BestModel for predictions
+
+```{r, results='hold', warning=FALSE, message=FALSE}
+Test$log.Y <- log(Test$Lifetime.People.who.have.liked.your.Page.and.engaged.with.your.post)
+Test$log.like <- log(Test$like+1)
+
+y_hat <- predict.lm(BestModel, newdata = Test, se.fit=TRUE)$fit
+y_hat <- as.vector(y_hat)
+dev <- Test$log.Y - (y_hat)
+num <- sum(dev^2)
+dev1 <- Test$log.Y - mean(log(Test$Lifetime.People.who.have.liked.your.Page.and.engaged.with.your.post))
+den <- sum(dev1^2)
+Predicted.Rsq <- 1 - (num/den)
+Predicted.Rsq
+```
+
+ADD COMMENT
+
+##### PRESS Statistics
+```{r, results='hold', warning=FALSE, message=FALSE}
+press <- PRESS(BestModel)
+press$P.square
+
+sum(press$residuals^2)
+sum(BestModel$residuals^2)
+```
+
+* A low value of PRESS statistics is a good indicator that the model is good for predictions
+* This can be further confirmed by comparing the sum of PRESS residuals and sum of Best Model residuals, since the two
+residuals are close, the model can be used for predictions
+
+***
+### Running the model on our original data. [Using the entire data(n = 490)]
+```{r, results='hold', warning=FALSE, message=FALSE}
+fb.raw$log.Y <- log(fb.raw$Lifetime.People.who.have.liked.your.Page.and.engaged.with.your.post)
+fb.raw$log.like <- log(fb.raw$like+1)
+
+FbModel <- lm(log.Y ~ Page.total.likes + Type + Category + Post.Month + Post.Weekday + 
+                Post.Hour + log.like + Type:Post.Weekday + Type:Post.Hour, data = fb.raw)
+summary(FbModel)
+```
+
+##### Observing the residual plots and checking for Normality
+
+```{r, results='hold', warning=FALSE, message=FALSE}
+residuals <- rstandard(FbModel)
+qqnorm(residuals)
+qqline(residuals)
+
+stu.resid <- studres(FbModel) 
+hist(stu.resid, freq=FALSE, main="Distribution of Studentized Residuals") 
+xfit<-seq(-3.5, 7,length=40) 
+yfit<-dnorm(xfit) 
+lines(xfit, yfit)
+```
+
+##### Residuals plot with Fitted values and other Regressors 
+```{r, results='hold', warning=FALSE, message=FALSE}
+residualPlots(FbModel,id.n=3)
+```
+
+We are able to build a model to predict the performance of the page in terms of Lifetime people who have liked your page and engaged with your post
+which explains close to 83% variability.
+
+
+***
+### INTERPRETATION
+
+```{r, results='hold', warning=FALSE, message=FALSE}
+FbModel$coefficients1 <- FbModel$coefficients[!is.na(FbModel$coefficients)]
+```
+
+##### Positive coefficients
+```{r, results='hold', warning=FALSE, message=FALSE}
+sort(FbModel$coefficients1[FbModel$coefficients1 >0], decreasing = T)
+```
+
+##### Negative coefficients
+```{r, results='hold', warning=FALSE, message=FALSE}
+sort(FbModel$coefficients1[FbModel$coefficients1 < 0], decreasing = F)
+```
+
+
+* A page can get maximum engagement from people based on what type of content is uploaded, during what time, the category
+of the page, how many likes the post has received and number of people who have liked the page
+* The base model with just the intercept (Type: Link, Category: 1, Post.Month: 1, Post.Weekday: 1, Post.Hour: 1)
+suggest that on average, close to 20 people (exp(3.01855778735)) who have liked the page will also engage with the post
+
+* One percent increase in the number of likes increases the engagement level by 0.5%
+* Engagement level increases when the post is
+
+*   a. Type Photo is uploaded on Weekday3, Weekday5, Weekday7
+*   b. Type Photo is uploaded at hour 7,13,11,2,4
+*   c. Type Status is uploaded on Weekday3, Weekday5, Weekday6, Weekday7
+*   d. Type Status is uploaded at hour 2,4,11
+*   e. Significantly, Type Photo, Status is uploaded at hour 3,6,10
+*   f. Type Video is uploaded on Weekday3
+
+* Engagement level increases very little when the post is
+   a. Type Video is uploaded on Weekday4, Weekday5
+   a. Type Video is uploaded on Hour10
+   
+***
